@@ -26,7 +26,7 @@ CHANNELS = [
     ("2023_Alkass_6", "Alkass 6"),
 ]
 
-XML_TZ = "+0300"  # beIN Qatar time
+XML_TZ = "+0200"  # beIN Qatar time
 
 def format_date(date_str, time_str, next_day=False):
     dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
