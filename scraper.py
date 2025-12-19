@@ -70,7 +70,7 @@ def scrape():
                         clean_desc = descs_raw[j].strip().replace('&', '&amp;') if j < len(descs_raw) else ""
                         
                         # Use your phone's timezone offset (+0200) so the app doesn't shift it
-                        entry =  f'  <programme start="{start_xml} +0200" stop="{end_xml} +0200" channel="{ch_id}">\n'
+                        entry =  f'  <programme start="{start_xml} +0300" stop="{end_xml} +0300" channel="{ch_id}">\n'
                         entry += f'    <title lang="en">{clean_title}</title>\n'
                         if clean_desc:
                             entry += f'    <desc lang="ar">{clean_desc}</desc>\n'
