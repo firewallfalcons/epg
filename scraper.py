@@ -1,16 +1,15 @@
 import requests
 import re
+import os
 from datetime import datetime, timedelta
 
 # Settings
 FILENAME = "bein.xml"
 DAYS_TO_SCRAPE = 3
-
-# Required beIN parameters
 POST_ID = "25344"
 SERVICE_ID = "bein.net"
 
-# Define the channels for the XMLTV header
+# Channel IDs for the header
 CHANNELS = [
     ("beIN_SPORTS1", "beIN Sports 1"), ("beIN_SPORTS2", "beIN Sports 2"),
     ("beIN_SPORTS3", "beIN Sports 3"), ("beIN_SPORTS4", "beIN Sports 4"),
@@ -22,15 +21,21 @@ CHANNELS = [
     ("2023_Alkass_6", "Alkass 6")
 ]
 
-def format_full_date(date_str, time_str, next_day=False):
-    dt = datetime.strptime(date_str, '%Y-%m-%d')
+def format_cairo_date(date_str, time_str, next_day=False):
+    # Combine date and time
+    fmt = '%Y-%m-%d %H:%M'
+    dt = datetime.strptime(f"{date_str} {time_str}", fmt)
+    
+    # beIN source is UTC+3. Cairo is UTC+2. Subtract 1 hour.
+    dt = dt - timedelta(hours=1)
+    
     if next_day:
         dt += timedelta(days=1)
-    clean_time = time_str.strip().replace(':', '')
-    return dt.strftime('%Y%m%d') + clean_time + "00"
+        
+    return dt.strftime('%Y%m%d%H%M%S')
 
 def scrape():
-    print("Starting beIN EPG Scraper...")
+    print("Starting beIN EPG Scraper (Cairo Time)...")
     xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="GitHub beIN Scraper">\n'
     for c_id, c_name in CHANNELS:
         xml_header += f'  <channel id="{c_id}">\n    <display-name>{c_name}</display-name>\n  </channel>\n'
@@ -42,60 +47,57 @@ def scrape():
 
     for i in range(0, DAYS_TO_SCRAPE):
         date_str = (datetime.today() + timedelta(days=i)).strftime('%Y-%m-%d')
-        print(f"Scraping Date: {date_str}")
-        
         for idx in range(0, 4):
-            # Using the FULL original URL parameters
             url = f"https://www.bein.com/ar/epg-ajax-template/?action=epg_fetch&category=sports&serviceidentity={SERVICE_ID}&offset=00&mins=00&cdate={date_str}&language=AR&postid={POST_ID}&loadindex={idx}"
             
             try:
                 response = session.get(url, timeout=20)
                 data = response.text
                 
-                # Regex extraction
+                # Regex extraction including the 'format' tag for descriptions
                 times_raw = re.findall(r'<p\sclass=time>(.*?)<\/p>', data)
                 titles_raw = re.findall(r'<p\sclass=title>(.*?)<\/p>', data)
+                descs_raw = re.findall(r'<p\sclass=format>(.*?)<\/p>', data)
                 channels_raw = re.findall(r"data-img.*?sites\/\d+\/\d+\/\d+\/(.*?)\.png", data)
-                
-                print(f"  - Batch {idx}: Found {len(titles_raw)} programs")
+                lives_raw = re.findall(r"li\s+live='(\d)'", data)
 
-                # The loop must match the smallest list to avoid index errors
                 count = min(len(times_raw), len(titles_raw), len(channels_raw))
                 
                 for j in range(count):
                     ch_id = channels_raw[j].replace('_Digital_Mono', '').replace('_DIGITAL_Mono', '').replace('-1', '')
                     time_range = times_raw[j].replace('&nbsp;-&nbsp;', '-').split('-')
-                    
                     if len(time_range) < 2: continue
                     
                     start_t, end_t = time_range[0], time_range[1]
-                    
-                    # Correct midnight wrap-around logic
-                    # If end time is like 01:00 and start is 23:00, the end is on the next day
                     is_next_day = int(end_t.replace(':', '')) < int(start_t.replace(':', ''))
                     
-                    start_xml = format_full_date(date_str, start_t)
-                    end_xml = format_full_date(date_str, end_t, next_day=is_next_day)
+                    # Convert to Cairo Time
+                    start_xml = format_cairo_date(date_str, start_t)
+                    end_xml = format_cairo_date(date_str, end_t, next_day=is_next_day)
                     
                     entry_key = f"{ch_id}{start_xml}"
                     if entry_key not in seen_entries:
                         seen_entries.add(entry_key)
-                        # XML requires & to be escaped as &amp;
+                        
+                        # Clean Title and Live status
+                        is_live = "Live: " if (j < len(lives_raw) and lives_raw[j] == "1") else ""
                         clean_title = titles_raw[j].split('- ')[0].strip().replace('&', '&amp;')
                         
-                        entry = f'  <programme start="{start_xml} +0300" stop="{end_xml} +0300" channel="{ch_id}">\n'
-                        entry += f'    <title lang="en">{clean_title}</title>\n'
+                        # Get description from the format tag
+                        clean_desc = descs_raw[j].strip().replace('&', '&amp;') if j < len(descs_raw) else ""
+                        
+                        entry =  f'  <programme start="{start_xml} +0200" stop="{end_xml} +0200" channel="{ch_id}">\n'
+                        entry += f'    <title lang="en">{is_live}{clean_title}</title>\n'
+                        if clean_desc:
+                            entry += f'    <desc lang="ar">{clean_desc}</desc>\n'
                         entry += '  </programme>\n'
                         programme_content += entry
             except Exception as e:
-                print(f"    Error in Batch {idx}: {e}")
+                print(f"Error: {e}")
 
-    # Combine everything
-    full_xml = xml_header + programme_content + "</tv>"
-    
     with open(FILENAME, "w", encoding="utf-8") as f:
-        f.write(full_xml)
-    print(f"Successfully saved {FILENAME} with {len(seen_entries)} total entries.")
+        f.write(xml_header + programme_content + "</tv>")
+    print(f"Successfully saved {FILENAME} for Cairo time.")
 
 if __name__ == "__main__":
     scrape()
