@@ -8,7 +8,7 @@ DAYS_TO_SCRAPE = 3
 POST_ID = "25344"
 SERVICE_ID = "bein.net"
 
-# Channel IDs for the header
+# Channel IDs
 CHANNELS = [
     ("beIN_SPORTS1", "beIN Sports 1"), ("beIN_SPORTS2", "beIN Sports 2"),
     ("beIN_SPORTS3", "beIN Sports 3"), ("beIN_SPORTS4", "beIN Sports 4"),
@@ -21,67 +21,99 @@ CHANNELS = [
 ]
 
 def format_date(date_str, time_str, next_day=False):
-    dt = datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M')
+    dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     if next_day:
         dt += timedelta(days=1)
-    return dt.strftime('%Y%m%d%H%M%S')
+    return dt.strftime("%Y%m%d%H%M%S")
 
 def scrape():
-    print("Starting beIN EPG Scraper (Fixed Time & Midnight Wrap)...")
-    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="GitHub beIN Scraper">\n'
-    for c_id, c_name in CHANNELS:
-        xml_header += f'  <channel id="{c_id}">\n    <display-name>{c_name}</display-name>\n  </channel>\n'
-    
+    print("Starting beIN EPG Scraper (NO TIME SHIFT)...")
+
+    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    xml_header += '<tv generator-info-name="beIN Scraper">\n'
+
+    for cid, cname in CHANNELS:
+        xml_header += f'  <channel id="{cid}">\n'
+        xml_header += f'    <display-name>{cname}</display-name>\n'
+        xml_header += '  </channel>\n'
+
     programme_content = ""
-    seen_entries = set()
+    seen = set()
+
     session = requests.Session()
-    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0"
+    })
 
-    for i in range(0, DAYS_TO_SCRAPE):
-        date_str = (datetime.today() + timedelta(days=i)).strftime('%Y-%m-%d')
-        for idx in range(0, 4):
-            url = f"https://www.bein.com/ar/epg-ajax-template/?action=epg_fetch&category=sports&serviceidentity={SERVICE_ID}&offset=00&mins=00&cdate={date_str}&language=AR&postid={POST_ID}&loadindex={idx}"
+    for d in range(DAYS_TO_SCRAPE):
+        date_str = (datetime.today() + timedelta(days=d)).strftime("%Y-%m-%d")
+
+        for idx in range(4):
+            url = (
+                "https://www.bein.com/ar/epg-ajax-template/"
+                f"?action=epg_fetch&category=sports&serviceidentity={SERVICE_ID}"
+                f"&offset=00&mins=00&cdate={date_str}"
+                f"&language=AR&postid={POST_ID}&loadindex={idx}"
+            )
+
             try:
-                response = session.get(url, timeout=20)
-                data = response.text
-                times_raw = re.findall(r'<p\sclass=time>(.*?)<\/p>', data)
-                titles_raw = re.findall(r'<p\sclass=title>(.*?)<\/p>', data)
-                descs_raw = re.findall(r'<p\sclass=format>(.*?)<\/p>', data)
-                channels_raw = re.findall(r"data-img.*?sites\/\d+\/\d+\/\d+\/(.*?)\.png", data)
+                r = session.get(url, timeout=20)
+                html = r.text
 
-                count = min(len(times_raw), len(titles_raw), len(channels_raw))
-                for j in range(count):
-                    ch_id = channels_raw[j].replace('_Digital_Mono', '').replace('_DIGITAL_Mono', '').replace('-1', '')
-                    time_range = times_raw[j].replace('&nbsp;-&nbsp;', '-').split('-')
-                    if len(time_range) < 2: continue
-                    
-                    start_t, end_t = time_range[0], time_range[1]
-                    
-                    # FIXED: Check if program ends after midnight (e.g. 23:00 to 01:00)
-                    is_next_day = int(end_t.replace(':', '')) < int(start_t.replace(':', ''))
-                    
+                times = re.findall(r'<p\sclass=time>(.*?)<\/p>', html)
+                titles = re.findall(r'<p\sclass=title>(.*?)<\/p>', html)
+                descs = re.findall(r'<p\sclass=format>(.*?)<\/p>', html)
+                channels = re.findall(
+                    r"sites\/\d+\/\d+\/\d+\/(.*?)\.png", html
+                )
+
+                count = min(len(times), len(titles), len(channels))
+
+                for i in range(count):
+                    ch_id = (
+                        channels[i]
+                        .replace("_Digital_Mono", "")
+                        .replace("_DIGITAL_Mono", "")
+                        .replace("-1", "")
+                    )
+
+                    t = times[i].replace("&nbsp;-&nbsp;", "-").split("-")
+                    if len(t) != 2:
+                        continue
+
+                    start_t, end_t = t
+                    next_day = int(end_t.replace(":", "")) < int(start_t.replace(":", ""))
+
                     start_xml = format_date(date_str, start_t)
-                    end_xml = format_date(date_str, end_t, next_day=is_next_day)
-                    
-                    entry_key = f"{ch_id}{start_xml}"
-                    if entry_key not in seen_entries:
-                        seen_entries.add(entry_key)
-                        clean_title = titles_raw[j].split('- ')[0].strip().replace('&', '&amp;')
-                        clean_desc = descs_raw[j].strip().replace('&', '&amp;') if j < len(descs_raw) else ""
-                        
-                        # Use your phone's timezone offset (+0200) so the app doesn't shift it
-                        entry =  f'  <programme start="{start_xml} +0200" stop="{end_xml} +0200" channel="{ch_id}">\n'
-                        entry += f'    <title lang="en">{clean_title}</title>\n'
-                        if clean_desc:
-                            entry += f'    <desc lang="ar">{clean_desc}</desc>\n'
-                        entry += '  </programme>\n'
-                        programme_content += entry
-            except: continue
+                    end_xml = format_date(date_str, end_t, next_day)
+
+                    key = f"{ch_id}{start_xml}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    title = titles[i].split("- ")[0].strip().replace("&", "&amp;")
+                    desc = descs[i].strip().replace("&", "&amp;") if i < len(descs) else ""
+
+                    programme_content += (
+                        f'  <programme start="{start_xml}" stop="{end_xml}" channel="{ch_id}">\n'
+                        f'    <title lang="en">{title}</title>\n'
+                    )
+
+                    if desc:
+                        programme_content += f'    <desc lang="ar">{desc}</desc>\n'
+
+                    programme_content += "  </programme>\n"
+
+            except Exception as e:
+                continue
 
     full_xml = xml_header + programme_content + "</tv>"
+
     with open(FILENAME, "w", encoding="utf-8") as f:
         f.write(full_xml)
-    print(f"Successfully saved {FILENAME} for Cairo Offset.")
+
+    print(f"EPG saved correctly as {FILENAME} (NO DELAY)")
 
 if __name__ == "__main__":
     scrape()
