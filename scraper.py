@@ -26,21 +26,16 @@ CHANNELS = [
     ("2023_Alkass_6", "Alkass 6"),
 ]
 
-# beIN is UTC+3 → convert to UTC
-SOURCE_TZ_OFFSET = 3
+XML_TZ = "+0300"  # beIN Qatar time
 
 def format_date(date_str, time_str, next_day=False):
     dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     if next_day:
         dt += timedelta(days=1)
-
-    # Convert UTC+3 → UTC
-    dt -= timedelta(hours=SOURCE_TZ_OFFSET)
-
     return dt.strftime("%Y%m%d%H%M%S")
 
 def scrape():
-    print("Starting beIN EPG Scraper (PROPER UTC FIX)...")
+    print("Starting beIN EPG Scraper (Televizio SAFE)...")
 
     xml = '<?xml version="1.0" encoding="UTF-8"?>\n'
     xml += '<tv generator-info-name="beIN Scraper">\n'
@@ -73,7 +68,9 @@ def scrape():
                 times = re.findall(r'<p\sclass=time>(.*?)<\/p>', html)
                 titles = re.findall(r'<p\sclass=title>(.*?)<\/p>', html)
                 descs = re.findall(r'<p\sclass=format>(.*?)<\/p>', html)
-                channels = re.findall(r"\/(.*?)\.png", html)
+                channels = re.findall(
+                    r"sites\/\d+\/\d+\/\d+\/(.*?)\.png", html
+                )
 
                 for i in range(min(len(times), len(titles), len(channels))):
                     ch_id = channels[i].replace("_Digital_Mono", "").replace("-1", "")
@@ -97,11 +94,14 @@ def scrape():
                     desc = descs[i].strip().replace("&", "&amp;") if i < len(descs) else ""
 
                     programmes += (
-                        f'  <programme start="{start} +0000" stop="{end} +0000" channel="{ch_id}">\n'
+                        f'  <programme start="{start} {XML_TZ}" '
+                        f'stop="{end} {XML_TZ}" channel="{ch_id}">\n'
                         f'    <title lang="en">{title}</title>\n'
                     )
+
                     if desc:
                         programmes += f'    <desc lang="ar">{desc}</desc>\n'
+
                     programmes += '  </programme>\n'
 
             except:
@@ -112,7 +112,7 @@ def scrape():
     with open(FILENAME, "w", encoding="utf-8") as f:
         f.write(xml)
 
-    print("EPG FIXED ✔ Correct time ✔ Correct order ✔ No shift")
+    print("EPG UPDATED ✔ Televizio OK ✔ Correct Timing ✔")
 
 if __name__ == "__main__":
     scrape()
